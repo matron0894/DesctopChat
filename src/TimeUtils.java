@@ -1,7 +1,7 @@
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
-public class CorrectDateTime {
+public class TimeUtils {
 
     public static final String TIME = "(HH:mm:ss) ";
     public static final String DATE = "d MMMM, yy  HH:mm";
