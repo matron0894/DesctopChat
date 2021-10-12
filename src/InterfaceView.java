@@ -1,25 +1,20 @@
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
-public class InterfaceView extends JFrame{
+public class InterfaceView extends JFrame implements ActionListener {
 
     private JButton startServerBtn;
     private JButton stopServerBtn;
     private JButton sendBtn;
-    private static JTextField chatContentField;
+    private JTextField chatContentField;
     private JTextArea historyRecordArea;
 
     private static final String START_SERVER = "Connect";
     private static final String STOP_SERVER = "Disconnect";
-
-
-    public ServerChat serverChat = new ServerChat();
-
-    public void setHistoryRecordArea(String history) {
-
-        historyRecordArea.append(history);
-    }
+    private static final String SEND_TEXT = "Send";
 
     public InterfaceView() {
         showPanel();
@@ -70,8 +65,9 @@ public class InterfaceView extends JFrame{
         JPanel panel = new JPanel(); // the panel is not visible in output
         JLabel time = new JLabel(TimeUtils.getDateTime());
         JLabel input = new JLabel("Input: ");
-        JTextField chatContentField = new JTextField(30); // accepts upto 10 characters
-        sendBtn = new JButton("Send");
+        chatContentField = new JTextField(30); // accepts upto 10 characters
+        chatContentField.setEditable(true);
+        sendBtn = new JButton(SEND_TEXT);
 
         panel.add(time);
         panel.add(input); // Components Added using Flow Layout
@@ -95,36 +91,38 @@ public class InterfaceView extends JFrame{
         frame.getContentPane().add(BorderLayout.WEST, leftScroll);
         frame.setVisible(true);
 
-//        setupListener();
+       setupListener();
 
 
     }
 
-//    // Set the listening event of the button
-//    private void setupListener() {
-//        startServerBtn.addActionListener(this);
-//        stopServerBtn.addActionListener(this);
-//        sendBtn.addActionListener(this);
-//        //clearContentBtn.addActionListener(this);
-//        // The carriage return event of the text box to send the message
-//        chatContentField.addActionListener(this);
-//    }
-//
-//    @Override
-//    public void actionPerformed(ActionEvent e) {
-//        String actionCommand = e.getActionCommand();
-//
-//        if (actionCommand.equals(START_SERVER)) {
-//            connect();
-//        }
-//    }
+    // Set the listening event of the button
+    private void setupListener() {
+        startServerBtn.addActionListener(this);
+        stopServerBtn.addActionListener(this);
+        sendBtn.addActionListener(this);
+        //clearContentBtn.addActionListener(this);
+        // The carriage return event of the text box to send the message
+        chatContentField.addActionListener(this);
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        String actionCommand = e.getActionCommand();
+
+        if (actionCommand.equals(SEND_TEXT)) {
+            String text = chatContentField.getText();
+            historyRecordArea.append(text + "\n");
+            chatContentField.setText("  ");
+        }
+    }
 
 
-//    public static void main(String[] args) {
-//
-//        SwingUtilities.invokeLater(() -> new InterfaceView());
-//
-//    }
+    public static void main(String[] args) {
+
+        SwingUtilities.invokeLater(() -> new InterfaceView());
+
+    }
 
 
 }

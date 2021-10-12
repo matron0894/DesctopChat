@@ -5,7 +5,9 @@ import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -13,11 +15,12 @@ import java.util.logging.Logger;
  * Class for Server
  *
  * @version 1.0
- * */
+ */
 
 public class ServerChat extends Thread {
     private static final Logger LOGGER = Logger.getLogger(ServerChat.class.getName());
     private static Selector selector;
+    List<SocketChannel> clientList = new ArrayList<>();
     private SelectionKey serverKey;
 
     public static void main(String[] args) {
@@ -31,7 +34,7 @@ public class ServerChat extends Thread {
         setSelector();
 
         try {
-            for(;;) {
+            for (; ; ) {
                 // printInfo("Сервер ждет подключений.");
                 // Selects a set of keys whose corresponding channels are ready for I/O operations
                 // Ждем до того, как появится хотя бы одно событие. Как появятся, выбираем ключи с этими событиями
@@ -88,6 +91,25 @@ public class ServerChat extends Thread {
         }
     }
 
+    private void accept(SelectionKey key) {
+        try {
+            ServerSocketChannel serverSocket = (ServerSocketChannel) key.channel();
+            SocketChannel serverChannel = serverSocket.accept();
+
+            // Adjusts this channel's blocking mode to false
+            serverChannel.configureBlocking(false);
+
+            // Operation-set bit for read operations
+            serverChannel.register(selector, SelectionKey.OP_READ); //Принимаем подключение у сервера. Тут же его регистрируем в селекторе с OP_READ.
+            key.interestOps(SelectionKey.OP_ACCEPT);
+            LOGGER.info("Connection Accepted: " + serverChannel.getLocalAddress() + "\n");
+            writeMsg("Please enter your nickname and communicate after identifying your identity", serverChannel);
+            clientList.add(serverChannel);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void iterateSKeys(SelectionKey key) {
         /** Для каждого ключа, с которым вы работаете, вы можете проверить его статус с помощью таких методов
          как isAcceptable или isReadable. Они сообщают вам, какую операцию ждет ключ.*/
@@ -108,24 +130,7 @@ public class ServerChat extends Thread {
 
         // Tests whether this key's channel is ready for writing
         else if (key.isWritable()) {
-            send(key);
-        }
-    }
-
-    private void accept(SelectionKey key) {
-        try {
-            ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel();
-            SocketChannel clientChannel = serverChannel.accept();
-
-            // Adjusts this channel's blocking mode to false
-            clientChannel.configureBlocking(false);
-
-            // Operation-set bit for read operations
-            clientChannel.register(selector, SelectionKey.OP_READ); //Принимаем подключение у сервера. Тут же его регистрируем в селекторе с OP_READ.
-            key.interestOps(SelectionKey.OP_ACCEPT);
-            LOGGER.info("Connection Accepted: " + clientChannel.getLocalAddress() + "\n");
-        } catch (IOException e) {
-            e.printStackTrace();
+            sendMessage(key);
         }
     }
 
@@ -161,6 +166,8 @@ public class ServerChat extends Thread {
                 SelectionKey sKey = iter.next();
                 sKey.attach(msg);
                 sKey.interestOps(sKey.interestOps() | SelectionKey.OP_WRITE);
+                SocketChannel sc = (SocketChannel) sKey.channel();
+
             }
             buffer.clear();
         } catch (IOException e1) {
@@ -177,7 +184,7 @@ public class ServerChat extends Thread {
         }
     }
 
-    private void send(SelectionKey key) {
+    private void sendMessage(SelectionKey key) {
         try {
             SocketChannel channel = (SocketChannel) key.channel();
             Object attachment = key.attachment();  //Retrieves the current attachment.
@@ -188,6 +195,22 @@ public class ServerChat extends Thread {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void writeMsg(String msg, SocketChannel clientChannel) {
+        try {
+            ByteBuffer buffer = ByteBuffer.allocate(100);
+            buffer.clear();
+            buffer.put(msg.getBytes());
+            buffer.flip();
+            clientChannel.write(buffer);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendAll(String msg) {
+
     }
 
     private void printInfo(String info) {

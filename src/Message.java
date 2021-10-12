@@ -4,6 +4,11 @@ public class Message {
     private String userName;
     private String content;
 
+
+    public Message(String content) {
+        this.content = content;
+    }
+
     public String getCommand() {
         return command;
     }
