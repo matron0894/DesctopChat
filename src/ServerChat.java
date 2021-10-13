@@ -17,52 +17,27 @@ import java.util.logging.Logger;
  * @version 1.0
  */
 
-public class ServerChat extends Thread {
+public class ServerChat {
+
     private static final Logger LOGGER = Logger.getLogger(ServerChat.class.getName());
+    private static String HOST = "localhost";
+    private static String PORT = "6001";
+
     private static Selector selector;
-    List<SocketChannel> clientList = new ArrayList<>();
+    private ByteBuffer readBuffer = ByteBuffer.allocate(1024);
+    private List<SocketChannel> clientList = new ArrayList<>();
     private SelectionKey serverKey;
 
+
     public static void main(String[] args) {
-        ServerChat server = new ServerChat();
-        server.start();
+        new ServerChat();
     }
 
-    @Override
-    public void run() {
-
-        setSelector();
-
-        try {
-            for (; ; ) {
-                // printInfo("Сервер ждет подключений.");
-                // Selects a set of keys whose corresponding channels are ready for I/O operations
-                // Ждем до того, как появится хотя бы одно событие. Как появятся, выбираем ключи с этими событиями
-                int count = selector.select();
-                if (count == 0) continue;
-
-                // token representing the registration of a SelectableChannel with a Selector
-                //Returns this selector's selected-key set. Все, что регистрирует Selector и что ждет данных,
-                //является частью этого набора ключей.
-                Set<SelectionKey> selectionKeySet = selector.selectedKeys();
-                // После получения набора ключей, последовательно пройдите по каждому ключу, удаляя и обрабатывая его.
-
-                Iterator<SelectionKey> iterator = selectionKeySet.iterator();
-
-                while (iterator.hasNext()) {
-                    SelectionKey key = iterator.next();
-
-                    iterateSKeys(key);
-                }
-
-                iterator.remove();
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    public ServerChat() {
+        init();
     }
 
-    private void setSelector() {
+    private void init() {
         try {
             //A multiplexor of SelectableChannel objects.
             //Selector — своеобразный слушатель, который сообщает, когда с каналом можно совершить какое-то действие.
@@ -71,7 +46,7 @@ public class ServerChat extends Thread {
                 ServerSocketChannel serverSocket = ServerSocketChannel.open();
                 //Binds the channel's socket to a local address and
                 // configures the socket to listen for connections.
-                serverSocket.bind(new InetSocketAddress("localhost", 6001));
+                serverSocket.bind(new InetSocketAddress(HOST, Integer.parseInt(PORT)));
                 //configureBlocking - if false then it will be placed non-blocking mode
                 serverSocket.configureBlocking(false);
                 //return SelectionKey.OP_ACCEPT
@@ -84,6 +59,8 @@ public class ServerChat extends Thread {
 
                 LOGGER.info("The server started successfully!");
 
+                ServerConnect connect = new ServerConnect();
+                connect.start();
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -91,23 +68,40 @@ public class ServerChat extends Thread {
         }
     }
 
-    private void accept(SelectionKey key) {
-        try {
-            ServerSocketChannel serverSocket = (ServerSocketChannel) key.channel();
-            SocketChannel serverChannel = serverSocket.accept();
+    class ServerConnect extends Thread {
 
-            // Adjusts this channel's blocking mode to false
-            serverChannel.configureBlocking(false);
+        @Override
+        public void run() {
 
-            // Operation-set bit for read operations
-            serverChannel.register(selector, SelectionKey.OP_READ); //Принимаем подключение у сервера. Тут же его регистрируем в селекторе с OP_READ.
-            key.interestOps(SelectionKey.OP_ACCEPT);
-            LOGGER.info("Connection Accepted: " + serverChannel.getLocalAddress() + "\n");
-            writeMsg("Please enter your nickname and communicate after identifying your identity", serverChannel);
-            clientList.add(serverChannel);
-        } catch (IOException e) {
-            e.printStackTrace();
+            try {
+                for (; ; ) {
+                    // printInfo("Сервер ждет подключений.");
+                    // Selects a set of keys whose corresponding channels are ready for I/O operations
+                    // Ждем до того, как появится хотя бы одно событие. Как появятся, выбираем ключи с этими событиями
+                    int count = selector.select();
+                    if (count == 0) continue;
+
+                    // token representing the registration of a SelectableChannel with a Selector
+                    //Returns this selector's selected-key set. Все, что регистрирует Selector и что ждет данных,
+                    //является частью этого набора ключей.
+                    Set<SelectionKey> selectionKeySet = selector.selectedKeys();
+                    // После получения набора ключей, последовательно пройдите по каждому ключу, удаляя и обрабатывая его.
+
+                    Iterator<SelectionKey> iterator = selectionKeySet.iterator();
+
+                    while (iterator.hasNext()) {
+                        SelectionKey key = iterator.next();
+
+                        iterateSKeys(key);
+                    }
+
+                    iterator.remove();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
+
     }
 
     private void iterateSKeys(SelectionKey key) {
@@ -128,9 +122,29 @@ public class ServerChat extends Thread {
             receive(key);
         }
 
-        // Tests whether this key's channel is ready for writing
-        else if (key.isWritable()) {
-            sendMessage(key);
+//        // Tests whether this key's channel is ready for writing
+//        else if (key.isWritable()) {
+//            sendMessage(key);
+//        }
+    }
+
+
+    private void accept(SelectionKey key) {
+        try {
+            ServerSocketChannel serverSocket = (ServerSocketChannel) key.channel();
+            SocketChannel clientChannel = serverSocket.accept();
+
+            // Adjusts this channel's blocking mode to false
+            clientChannel.configureBlocking(false);
+
+            // Operation-set bit for read operations
+            clientChannel.register(selector, SelectionKey.OP_READ); //Принимаем подключение у сервера. Тут же его регистрируем в селекторе с OP_READ.
+            key.interestOps(SelectionKey.OP_ACCEPT);
+            LOGGER.info("Connection Accepted: " + clientChannel.getLocalAddress());
+            sendMsg("Please enter your nickname and communicate after identifying your identity", clientChannel);
+            clientList.add(clientChannel);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -139,7 +153,7 @@ public class ServerChat extends Thread {
         try {
             //Returns the channel for which this key was created.
             clientChannel = (SocketChannel) key.channel();
-
+            readBuffer.clear();
             /*ByteBuffer: A byte buffer.
             This class defines six categories of operations upon byte buffers:
             Absolute and relative get and put methods that read and write single bytes;
@@ -147,29 +161,33 @@ public class ServerChat extends Thread {
             of bytes from this buffer into an array;*/
             // Cоздаёт буфер в Heap. Можно преобразовать в массив с помощью метода array()
             // Устанавливаем буферный буфер
-            ByteBuffer buffer = ByteBuffer.allocate(1024);
             // Если клиент закрывает канал, при чтении данных из канала возникнет IOException.
             // После обнаружения исключения закройте канал и отмените ключ
-            int length = clientChannel.read(buffer);
-            StringBuilder buf = new StringBuilder();
-            // Если данные читаются
-            if (length > 0) {
-                // Позволяем буферу переворачиваться и читать данные в буфере
-                buffer.flip();
-                buf.append(new String(buffer.array(), 0, length, StandardCharsets.UTF_8));
-            }
-            String msg = buf.toString();
-            printInfo(msg);
+            int length = clientChannel.read(readBuffer);
 
-            Iterator<SelectionKey> iter = selector.selectedKeys().iterator();
-            while (iter.hasNext()) {
-                SelectionKey sKey = iter.next();
-                sKey.attach(msg);
-                sKey.interestOps(sKey.interestOps() | SelectionKey.OP_WRITE);
-                SocketChannel sc = (SocketChannel) sKey.channel();
-
+            if (length == -1) {
+                key.cancel();
+                clientChannel.close();
+                return;
             }
-            buffer.clear();
+
+//            StringBuilder buf = new StringBuilder();
+//            // Если данные читаются
+//            if (length > 0) {
+//                // Позволяем буферу переворачиваться и читать данные в буфере
+//                readBuffer.flip();
+//                buf.append(new String(readBuffer.array(), 0, length, StandardCharsets.UTF_8));
+//            }
+//            String msg = buf.toString();
+//            printInfo(msg);
+            String msg = new String(this.readBuffer.array(), 0, length, StandardCharsets.UTF_8);
+            System.out.println(msg);
+            readBuffer.clear();
+
+          for (SocketChannel sc : clientList){
+              sendMsg(msg, sc);
+          }
+
         } catch (IOException e1) {
             // Когда клиент закрывает канал, сервер сообщит об исключении IOException при записи или чтении данных в буфер канала.
             // Решение: перехватить это исключение на сервере и закрыть канал канала на сервере
@@ -197,7 +215,7 @@ public class ServerChat extends Thread {
         }
     }
 
-    private void writeMsg(String msg, SocketChannel clientChannel) {
+    private void sendMsg(String msg, SocketChannel clientChannel) {
         try {
             ByteBuffer buffer = ByteBuffer.allocate(100);
             buffer.clear();
