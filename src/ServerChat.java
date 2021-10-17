@@ -1,14 +1,12 @@
+import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Logger;
 
 /**
@@ -24,9 +22,9 @@ public class ServerChat {
     private static String PORT = "6001";
 
     private static Selector selector;
-    private ByteBuffer readBuffer = ByteBuffer.allocate(1024);
-    private List<SocketChannel> clientList = new ArrayList<>();
-    private SelectionKey serverKey;
+    private final ByteBuffer readBuffer = ByteBuffer.allocate(1024);
+    private final List<SocketChannel> clientList = new ArrayList<>();
+    private final List<String> online = new ArrayList<>();
 
 
     public static void main(String[] args) {
@@ -55,15 +53,14 @@ public class ServerChat {
                 //A selectable channel's registration with a selector is represented by a SelectionKey object.
                 // A selection key is created each time a channel is registered with a selector.
                 //Registers this channel with the given selector, returning a selection key.
-                serverKey = serverSocket.register(selector, supportedOps, null);
+                SelectionKey serverKey = serverSocket.register(selector, supportedOps, null);
 
-                LOGGER.info("The server started successfully!");
+                LOGGER.info("Сервер успешно запущен!");
 
                 ServerConnect connect = new ServerConnect();
                 connect.start();
             }
         } catch (IOException e) {
-            e.printStackTrace();
             System.out.println("Ошибка в теле setSelector()");
         }
     }
@@ -105,8 +102,6 @@ public class ServerChat {
     }
 
     private void iterateSKeys(SelectionKey key) {
-        /** Для каждого ключа, с которым вы работаете, вы можете проверить его статус с помощью таких методов
-         как isAcceptable или isReadable. Они сообщают вам, какую операцию ждет ключ.*/
 
 //        if (!key.isValid()) {
 //            continue;
@@ -119,7 +114,7 @@ public class ServerChat {
 
         // Tests whether this key's channel is ready for reading
         else if (key.isReadable()) {
-            receive(key);
+            read(key);
         }
 
 //        // Tests whether this key's channel is ready for writing
@@ -127,7 +122,6 @@ public class ServerChat {
 //            sendMessage(key);
 //        }
     }
-
 
     private void accept(SelectionKey key) {
         try {
@@ -141,14 +135,12 @@ public class ServerChat {
             clientChannel.register(selector, SelectionKey.OP_READ); //Принимаем подключение у сервера. Тут же его регистрируем в селекторе с OP_READ.
             key.interestOps(SelectionKey.OP_ACCEPT);
             LOGGER.info("Connection Accepted: " + clientChannel.getLocalAddress());
-            sendMsg("Please enter your nickname and communicate after identifying your identity", clientChannel);
-            clientList.add(clientChannel);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private void receive(SelectionKey key) {
+    private void read(SelectionKey key) {
         SocketChannel clientChannel = null;
         try {
             //Returns the channel for which this key was created.
@@ -158,82 +150,120 @@ public class ServerChat {
             This class defines six categories of operations upon byte buffers:
             Absolute and relative get and put methods that read and write single bytes;
             Absolute and relative bulk get methods that transfer contiguous sequences
-            of bytes from this buffer into an array;*/
-            // Cоздаёт буфер в Heap. Можно преобразовать в массив с помощью метода array()
-            // Устанавливаем буферный буфер
-            // Если клиент закрывает канал, при чтении данных из канала возникнет IOException.
-            // После обнаружения исключения закройте канал и отмените ключ
+            of bytes from this buffer into an array;
+             Cоздаёт буфер в Heap. Можно преобразовать в массив с помощью метода array()
+             Устанавливаем буферный буфер
+             Если клиент закрывает канал, при чтении данных из канала возникнет IOException.
+             После обнаружения исключения закройте канал и отмените ключ*/
             int length = clientChannel.read(readBuffer);
 
             if (length == -1) {
                 key.cancel();
                 clientChannel.close();
+                clientList.remove(clientChannel);
                 return;
             }
 
-//            StringBuilder buf = new StringBuilder();
-//            // Если данные читаются
-//            if (length > 0) {
-//                // Позволяем буферу переворачиваться и читать данные в буфере
-//                readBuffer.flip();
-//                buf.append(new String(readBuffer.array(), 0, length, StandardCharsets.UTF_8));
-//            }
-//            String msg = buf.toString();
-//            printInfo(msg);
             String msg = new String(this.readBuffer.array(), 0, length, StandardCharsets.UTF_8);
-            System.out.println(msg);
-            readBuffer.clear();
 
-          for (SocketChannel sc : clientList){
-              sendMsg(msg, sc);
-          }
+            Gson gson = new Gson();
+            Message message = gson.fromJson(msg, Message.class);
+            String username = message.getUserName();
+            String command = message.getCommand();
+            String content = message.getContent();
 
+            if (command.equals("LOGIN")) {
+
+                online.add(username);
+
+                Message greetingMessage = new Message();
+                greetingMessage.setUserName("server");
+                greetingMessage.setCommand("LOGIN");
+                greetingMessage.setContent("Сервер Приветствуем тебя!");
+
+                String greeting = gson.toJson(greetingMessage, Message.class);
+                System.out.println(greeting);
+
+                unicast(greeting, clientChannel);
+
+                clientList.add(clientChannel);
+
+            } else if (command.equals("DISSCONNECT")) {
+                try {
+                    LOGGER.info("Connection close: " + clientChannel.getLocalAddress());
+
+                    Message goodbyeMessage = new Message();
+                    goodbyeMessage.setUserName("server");
+                    goodbyeMessage.setCommand("DISSCONNECT");
+                    goodbyeMessage.setContent(username + " покинул чат");
+
+                    String parting = gson.toJson(goodbyeMessage, Message.class);
+                    System.out.println(parting);
+
+                    multicast(parting);
+                    clientChannel.socket().close();
+                    clientChannel.close();
+                    clientList.remove(clientChannel);
+                } catch (IOException e2) {
+                    System.out.println("Что-то пошло не так ...");
+                }
+            } else {
+                System.out.println(username + " " + content + " " + TimeUtils.getCurrentTime());
+                readBuffer.clear();
+                multicast(msg);
+            }
         } catch (IOException e1) {
             // Когда клиент закрывает канал, сервер сообщит об исключении IOException при записи или чтении данных в буфер канала.
             // Решение: перехватить это исключение на сервере и закрыть канал канала на сервере
             key.cancel();
-            System.out.println("Goodbye client!");
             try {
+                System.out.println("Goodbye!");
+                LOGGER.info("Connection close: " + clientChannel.getLocalAddress());
                 clientChannel.socket().close();
                 clientChannel.close();
+                clientList.remove(clientChannel);
             } catch (IOException e2) {
-                e2.printStackTrace();
+                System.out.println("Что-то пошло не так ...");
             }
+        } catch (JsonSyntaxException jse) {
+            System.out.println("ыла совершена неудачная попытка получения сообщения.");
         }
     }
 
-    private void sendMessage(SelectionKey key) {
-        try {
-            SocketChannel channel = (SocketChannel) key.channel();
-            Object attachment = key.attachment();  //Retrieves the current attachment.
-            // После получения значения ключа оставьте значение ключа пустым, чтобы не повлиять на следующее использование
-            key.attach("");
-            channel.write(ByteBuffer.wrap(attachment.toString().getBytes()));
-            key.interestOps(key.interestOps() | SelectionKey.OP_READ);
-        } catch (Exception e) {
-            e.printStackTrace();
+    private void multicast(String msg) {
+        for (SocketChannel sc : clientList) {
+            unicast(msg, sc);
         }
     }
 
-    private void sendMsg(String msg, SocketChannel clientChannel) {
+    private void unicast(String msg, SocketChannel clientChannel) {
         try {
-            ByteBuffer buffer = ByteBuffer.allocate(100);
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
             buffer.clear();
+
             buffer.put(msg.getBytes());
             buffer.flip();
-            clientChannel.write(buffer);
+
+            while (buffer.hasRemaining()) {
+                clientChannel.write(buffer);
+            }
+            buffer.clear();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private void sendAll(String msg) {
+    //    private void sendMessage(SelectionKey key) {
+//        try {
+//            SocketChannel channel = (SocketChannel) key.channel();
+//            Object attachment = key.attachment();  //Retrieves the current attachment.
+//            // После получения значения ключа оставьте значение ключа пустым, чтобы не повлиять на следующее использование
+//            key.attach("");
+//            channel.write(ByteBuffer.wrap(attachment.toString().getBytes()));
+//            key.interestOps(key.interestOps() | SelectionKey.OP_READ);
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//    }
 
-    }
-
-    private void printInfo(String info) {
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("(HH:mm:ss) ");
-        String time = dtf.format(LocalDateTime.now());
-        System.out.println(time + info);
-    }
 }

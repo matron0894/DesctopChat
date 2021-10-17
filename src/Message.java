@@ -4,8 +4,12 @@ public class Message {
     private String userName;
     private String content;
 
+    public Message() {
+    }
 
-    public Message(String content) {
+
+    public Message(String name ,String content) {
+        this.userName = name;
         this.content = content;
     }
 
@@ -31,5 +35,14 @@ public class Message {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    @Override
+    public String toString() {
+        return "Message: {" +
+                "command='" + command + '\'' +
+                ", userName='" + userName + '\'' +
+                ", content='" + content + '\'' +
+                '}';
     }
 }

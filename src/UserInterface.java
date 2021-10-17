@@ -1,14 +1,17 @@
+import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -32,12 +35,15 @@ public class UserInterface extends JFrame implements ActionListener {
 
 
     private static final Logger LOGGER = Logger.getLogger(ClientChat.class.getName());
-    private static String HOST = "localhost";
-    private static String PORT = "6001";
+    private static String DEFAULT_HOST = "localhost";
+    private static String DEFAULT_PORT = "6001";
 
-    private ByteBuffer buffer = ByteBuffer.allocate(256);
     private Selector selector;
     private SocketChannel clientChannel;
+    private ByteBuffer buffer = ByteBuffer.allocate(1024);
+    private final ClientConnect connect = new ClientConnect();
+
+    private User user;
 
     public static void main(String[] args) {
 
@@ -74,8 +80,8 @@ public class UserInterface extends JFrame implements ActionListener {
         JLabel loginLabel = new JLabel("Login:");
         JLabel passLabel = new JLabel("Password:");
 
-        ipField = new JTextField(HOST);
-        portField = new JTextField(PORT);
+        ipField = new JTextField(DEFAULT_HOST);
+        portField = new JTextField(DEFAULT_PORT);
         loginField = new JTextField("masha");
         passField = new JPasswordField("123456");
 
@@ -176,28 +182,57 @@ public class UserInterface extends JFrame implements ActionListener {
 
         if (actionCommand.equals(START_SERVER)) {
             init();
+
+            Message message = new Message();
+            message.setCommand("LOGIN");
+            message.setUserName(user.getName());
+            message.setContent(user.getName() + " подключается к чату...");
+
+            sendMessage(message);
+
         }
 
         if (actionCommand.equals(SEND_TEXT)) {
             String text = chatContentField.getText();
-            historyRecordArea.append(TimeUtils.getCurrentTime() +  text + "\n");
-            chatContentField.setText("  ");
 
-            send(text, clientChannel);
+            chatContentField.setText(" ");
+
+            if (text == null || text.equals("")) {
+                JOptionPane.showMessageDialog(this, "Вы ничего не ввели", "Ошибка подключения",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            Message message = new Message();
+            message.setCommand("CONNECTION");
+            message.setUserName(user.getName());
+            message.setContent(text);
+
+            sendMessage(message);
+
+//            sendText(text, user.getPersonalChannel());
         }
 
         if (actionCommand.equals(STOP_SERVER)) {
             try {
+                System.out.println("Соединение разрывается...");
+
+                Message message = new Message();
+                message.setCommand("DISSCONNECT");
+                message.setUserName(user.getName());
+                message.setContent("покинул чат.");
+
+                sendMessage(message);
+//                sendText(loginField.getText() + " покинул чат.", clientChannel);
+
                 selector.close();
                 clientChannel.close();
-
-                System.out.println("Соединение разрывается...");
-                historyRecordArea.append(" =========   Сеанс завершен. ======= ");
+                historyRecordArea.append(" =========   Сеанс завершен. ======= \n");
 
                 initBtnAndTextConnect();
 
             } catch (IOException ee) {
-                ee.printStackTrace();
+                System.out.println("Соединение завершено.");
             }
         }
     }
@@ -220,6 +255,11 @@ public class UserInterface extends JFrame implements ActionListener {
                     while (iterator.hasNext()) {
                         SelectionKey key = iterator.next();
 
+                        if (!key.isValid()) {
+                            continue;
+                        }
+
+
                         if (key.isReadable()) {
                             receive(key);
                         }
@@ -229,7 +269,9 @@ public class UserInterface extends JFrame implements ActionListener {
                 }
 
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("Ошибка в теле Thread.run()");
+            } catch (ClosedSelectorException ce) {
+                System.out.println("Селектор закрыт");
             }
         }
     }
@@ -237,66 +279,129 @@ public class UserInterface extends JFrame implements ActionListener {
     private void init() {
         clientChannel = null;
         try {
+            String ipaddr = ipField.getText();
+            String port = portField.getText();
+            String name = loginField.getText();
+
+            if (ipaddr != null && ipaddr.isEmpty() || ipaddr != null && port.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Please enter the server ip and port number!");
+                return;
+            }
+
             //  selectable channel for stream-oriented connecting sockets
-            System.out.println("Подключение к серверу " + HOST + " по порту " + PORT + "...");
+            System.out.println("Подключение к серверу " + ipaddr + " по порту " + port + "...");
+            historyRecordArea.append(String.format("===========> Подключение к серверу %s по порту %s \n", ipaddr, port));
+
             selector = Selector.open();
-            clientChannel = SocketChannel.open(new InetSocketAddress(HOST, Integer.parseInt(PORT)));
+            clientChannel = SocketChannel.open(new InetSocketAddress(ipaddr, Integer.parseInt(port)));
             clientChannel.configureBlocking(false);
             clientChannel.register(selector, SelectionKey.OP_READ, null);
-            System.out.println(loginField.getText() + " подключился...");
 
-            ClientConnect connect = new ClientConnect();
+            user = new User(name, clientChannel);
+
+            System.out.println(user.getName() + " подключился...");
+
             connect.start();
 
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (NumberFormatException ne) {
+            System.out.println();
+        } catch (ConnectException | ClosedChannelException cce) {
             LOGGER.info("Closes this connection.");
             try {
                 assert clientChannel != null;
                 clientChannel.close();
-            } catch (Exception e2) {
-                System.out.println("Подключение прошло неудачно...");
-                e2.printStackTrace();
+            } catch (Exception e) {
+                System.out.println("Сервер временно недоступен или введены некорректные данные \n");
+                historyRecordArea.append("===========> Сервер временно недоступен или введены некорректные данные \n");
             }
+        } catch (IOException e) {
+            System.out.println("Подключение прошло неудачно...");
+            historyRecordArea.append("===========> Подключение прошло неудачно \n");
         }
     }
 
-
-    private void send(String msg, SocketChannel sc) {
+ /*   private void sendText(String msg, SocketChannel sc) {
         try {
 //            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
 //            String input = reader.readLine().trim();
-            byte[] message = msg.getBytes();
-            buffer = ByteBuffer.wrap(message);
+            buffer.clear();
+            byte[] data = msg.getBytes();
+            buffer = ByteBuffer.wrap(data);
             sc.write(buffer);
             buffer.clear();
         } catch (Exception e) {
             System.out.println("Что-то пошло не так. Не удалось отправить сообщение.");
+            System.exit(0);
+            try {
+                sc.close();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+    }*/
+
+    private void sendMessage(Message msg) {
+        try {
+            buffer.clear();
+            Gson gson = new Gson();
+            byte[] data = gson.toJson(msg).getBytes();
+            buffer = ByteBuffer.wrap(data);
+            clientChannel.write(buffer);
+            buffer.clear();
+        } catch (Exception e) {
+            System.out.println("Что-то пошло не так. Не удалось отправить сообщение.");
+            try {
+                clientChannel.close();
+            } catch (IOException ex) {
+                System.out.println("Не удалось закрыть канал...");
+            }
         }
     }
 
     private void receive(SelectionKey key) {
-
         showBtnAndTextConnectSuccess();
-
+        SocketChannel socketChannel = null;
         try {
-            SocketChannel socketChannel = (SocketChannel) key.channel();
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
             buffer.clear();
-            socketChannel.read(buffer); //read into buffer.
-            buffer.flip();  //make buffer ready for read
+            socketChannel = (SocketChannel) key.channel();
 
-            System.out.print(TimeUtils.getCurrentTime());
-            StringBuilder msg = new StringBuilder();
-            while (buffer.hasRemaining()) {
-                msg.append((char) buffer.get()); // read 1 byte at a time
+            int length = socketChannel.read(buffer);
+            if (length == -1) {
+                key.cancel();
+                socketChannel.close();
+                return;
             }
-            System.out.println(msg);
+
+            String msg = new String(buffer.array(), 0, length, StandardCharsets.UTF_8);
+
+            Gson gson = new Gson();
+            Message message = gson.fromJson(msg, Message.class);
+            System.out.println(message);
+            String username = message.getUserName();
+            String command = message.getCommand();
+            String content = message.getContent();
+
+
+            System.out.println(username + ": " + content);
+            historyRecordArea.append(username + ": " + content + " " + TimeUtils.getCurrentTime() + "\n");
             buffer.clear();
             key.interestOps(SelectionKey.OP_READ);
-        } catch (IOException e) {
-            System.out.println("Что-то пошло не так. Не удалось получить сообщение.");
 
+        } catch (IOException e) {
+            System.out.println("Ошибка в теле receive(). Не удалось получить сообщение. \n");
+            key.cancel();
+            try {
+                socketChannel.close();
+            } catch (IOException ex) {
+                System.out.println(" Что-то пошло не так при закрытии канала.  \n");
+            }
+
+        } catch (JsonSyntaxException jse) {
+            System.out.println("Что-то не так с присланным JSON");
         }
+
+
     }
 
 }
