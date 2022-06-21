@@ -218,8 +218,9 @@ public class UserInterface extends JFrame implements ActionListener {
                 System.out.println("Соединение разрывается...");
 
                 Message message = new Message();
-                message.setCommand("DISSCONNECT");
+                message.setCommand("DISCONNECT");
                 message.setUserName(user.getName());
+
                 message.setContent("покинул чат.");
 
                 sendMessage(message);

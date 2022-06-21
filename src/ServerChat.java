@@ -188,13 +188,13 @@ public class ServerChat {
 
                 clientList.add(clientChannel);
 
-            } else if (command.equals("DISSCONNECT")) {
+            } else if (command.equals("DISCONNECT")) {
                 try {
                     LOGGER.info("Connection close: " + clientChannel.getLocalAddress());
 
                     Message goodbyeMessage = new Message();
                     goodbyeMessage.setUserName("server");
-                    goodbyeMessage.setCommand("DISSCONNECT");
+                    goodbyeMessage.setCommand("DISCONNECT");
                     goodbyeMessage.setContent(username + " покинул чат");
 
                     String parting = gson.toJson(goodbyeMessage, Message.class);
